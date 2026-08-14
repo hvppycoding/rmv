@@ -15,30 +15,52 @@ rmv: about to delete 3 items. Type the count to proceed (Enter cancels) >
 
 Everyone eventually writes some version of this:
 
-```sh
-ls $pattern          # look at what is about to go
-read -p "ok? " ans   # confirm
-rm $pattern          # delete
+```python
+arg = " ".join(sys.argv[1:])
+os.system(f"ls {arg}")       # look at what is about to go
+input("ok? ")                # confirm
+os.system(f"rm {arg}")       # delete
 ```
 
-It has a hole, and the hole is in the one thing the wrapper exists to guarantee.
-**The pattern is expanded twice.** Once by `ls`, once again by `rm`. Anything
-created in between is deleted without ever having been on screen:
+Most of the time this is fine. Your shell already expanded `*.log` into argv
+before the script started, so joining argv back together and handing it to `ls`
+and then `rm` names the same files both times.
+
+The problem is that the joined string is handed to **a shell**, twice, and a
+shell re-parses whatever it is given. The listing and the delete can then
+disagree — which is the one thing the wrapper exists to prevent.
+
+**A file name containing a glob character is expanded again:**
 
 ```
-reviewed:  ['old1.log', 'old2.log']
-           # a job writes IMPORTANT-result.log while you are reading
-deleted:   old1.log, old2.log, IMPORTANT-result.log
+argv:     ['report[1].txt']          # the file you asked to delete
+shell:    rm report[1].txt           # [1] is a character class, not a name
+deleted:  report1.txt                # a file that was never on screen
+left:     report[1].txt              # the file you did ask for
 ```
 
-On a shared box with jobs writing into the same directory, that is not a thought
-experiment. `rmv` expands once — the shell hands it a concrete argv, that array
-is frozen, displayed, and passed to `rm` unchanged. What you reviewed is what
+**A file name containing a space is split into two:**
+
+```
+argv:     ['my file.txt']
+shell:    rm my file.txt             # two operands now
+deleted:  my  and  file.txt          # if a file named `my` exists, it is gone
+```
+
+**And if a pattern rather than argv reaches the string** — a quoted argument, or
+a tool that takes the pattern itself — it really is expanded twice, so anything
+created between the review and the confirmation is deleted unseen:
+
+```
+reviewed: old1.log, old2.log
+          # a job writes IMPORTANT-result.log while you are reading
+deleted:  old1.log, old2.log, IMPORTANT-result.log
+```
+
+`rmv` never builds a command string. The shell expands once into argv, that
+array is frozen, displayed, and passed to `rm` as the same array. No shell sees
+it, so `weird;$(whoami).txt` is just a file name, and what you reviewed is what
 gets deleted.
-
-The same property removes the other problem with the naive version: no shell is
-involved in the delete, so a file named `weird;$(whoami).txt` is just a file
-name.
 
 ## Why a count instead of `y/n`?
 
@@ -118,7 +140,7 @@ the prompt itself does not.
 |---|---|---|---|
 | `rm -i` | no | no, one per file | n/a |
 | `rm -I` | no, count only | yes | n/a |
-| `ls` + `rm` script | yes | yes | **no**, expanded twice |
+| `ls` + `rm` script | yes | yes | **not always** — the string is re-parsed by a shell twice |
 | trash / `rip` | no | no | n/a, recoverable after the fact |
 | `rmv` | yes | yes | yes |
 
@@ -127,6 +149,31 @@ about matching but wrong about wanting. They are worth having alongside this,
 not instead of it — a preview cannot save you from a delete you would have
 confirmed anyway, and a trash can cannot tell you that your glob was wrong while
 there is still time to fix it.
+
+## See it for yourself
+
+`demo.sh` builds a throwaway directory under `$TMPDIR` and runs each of the
+failures above for real, first with a naive wrapper and then with `rmv`, then
+reports what actually survived. Nothing outside the sandbox is touched.
+
+```
+$ ./demo.sh
+...
+ 1. A file name containing glob characters
+  naive:  left over -> report[1].txt
+    FAIL  naive keeps report1.txt
+  rmv:    left over -> report1.txt
+    ok    rmv keeps report1.txt
+...
+ 5. The ordinary case: argv already expanded, plain names
+    ok    naive deletes exactly the logs
+    ok    rmv deletes exactly the logs
+
+ 6 ok, 4 failed
+```
+
+Case 5 is there on purpose: with argv already expanded and plain file names,
+the naive wrapper is correct, which is why it feels fine for a long time.
 
 ## Requirements
 

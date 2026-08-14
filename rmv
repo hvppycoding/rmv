@@ -187,11 +187,14 @@ done
 printf '\n%s: about to delete %d items. Type the count to proceed (Enter cancels) > ' \
     "$prog" "$n"
 
-# Read from the terminal so the prompt still works with stdin on a pipe, and
-# fall back to stdin where there is no controlling tty. Redirections are applied
-# left to right, so 2>/dev/null has to come first to swallow a failing open.
+# Interactively the answer comes from the terminal. With stdin redirected it
+# comes from stdin, so the confirmation can be scripted and tested; reaching EOF
+# there leaves the answer empty, which cancels. Redirections apply left to
+# right, so 2>/dev/null has to come first to swallow a failing open.
 answer=
-if ! read -r answer 2>/dev/null < /dev/tty; then
+if [ -t 0 ]; then
+    read -r answer 2>/dev/null < /dev/tty || read -r answer || answer=
+else
     read -r answer || answer=
 fi
 
