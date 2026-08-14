@@ -97,6 +97,10 @@ while [ $# -gt 0 ]; do
     # recursion and drops the file from the listing, read as a file it ignores
     # a flag that was meant. Stop instead and make the caller disambiguate.
     case $arg in
+        --)
+            # The delimiter itself is never ambiguous, even where a file called
+            # -- exists: that file is named by the argument after this one.
+            ;;
         -?*)
             if [ -e "$arg" ] || [ -L "$arg" ]; then
                 ambiguous+=("$arg")
