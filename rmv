@@ -80,6 +80,7 @@ fi
 
 opts=()
 targets=()
+ambiguous=()
 recursive=0
 force=0
 end_of_opts=0
@@ -92,6 +93,19 @@ while [ $# -gt 0 ]; do
         targets+=("$arg")
         continue
     fi
+
+    # A glob can hand us a file whose name starts with a dash, and argv cannot
+    # say whether `-r' means "recursive" or "the file called -r". Guessing
+    # either way is destructive: read as an option it silently turns on
+    # recursion and drops the file from the listing, read as a file it ignores
+    # a flag that was meant. Stop instead and make the caller disambiguate.
+    case $arg in
+        -?*)
+            if [ -e "$arg" ] || [ -L "$arg" ]; then
+                ambiguous+=("$arg")
+            fi
+            ;;
+    esac
 
     case $arg in
         --)
@@ -133,7 +147,17 @@ done
 # ${arr[@]} on an empty array trips `set -u` under bash 3.2, so expand guarded.
 opt_args=(${opts[@]+"${opts[@]}"})
 tgt_args=(${targets[@]+"${targets[@]}"})
+amb_args=(${ambiguous[@]+"${ambiguous[@]}"})
 n=${#tgt_args[@]}
+
+if [ ${#amb_args[@]} -gt 0 ]; then
+    for a in "${amb_args[@]}"; do
+        echo "$prog: '$a' is both an option and a file that exists here" >&2
+    done
+    echo "$prog: refusing to guess. To delete them:  $prog -- <file>..." >&2
+    echo "$prog: to pass them as options, delete the files another way first." >&2
+    exit 1
+fi
 
 if [ "$n" -eq 0 ]; then
     if [ "$force" -eq 1 ]; then

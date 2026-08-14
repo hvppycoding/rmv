@@ -152,7 +152,37 @@ check "rmv runs no extra command" "" "$(listing "$d")"
 
 echo
 echo "=============================================================="
-echo " 5. The ordinary case: argv already expanded, plain names"
+echo " 5. A file whose name starts with a dash"
+echo "=============================================================="
+echo
+echo "  A directory holds a file named -r and a directory mydir."
+echo "  Deleting * must not recurse into mydir: nobody asked for -r"
+echo "  to mean recursive. argv cannot tell the two apart, so the"
+echo "  only safe move is to stop."
+echo
+
+naive_dash() {
+    local opts=() args=() a
+    for a in "$@"; do
+        case $a in -*) opts+=("$a") ;; *) args+=("$a") ;; esac
+    done
+    /bin/ls -d "${args[@]}" >/dev/null 2>&1
+    /bin/rm ${opts[@]+"${opts[@]}"} "${args[@]}" >/dev/null 2>&1
+}
+
+d=$(newdir dash-naive); ( cd "$d" && mkdir mydir && touch -- -r mydir/keep1 mydir/keep2 )
+( cd "$d" && naive_dash * )
+echo "  naive:  left over -> $(listing "$d")"
+check "naive does not recurse into mydir" "-r mydir " "$(listing "$d")"
+
+d=$(newdir dash-rmv); ( cd "$d" && mkdir mydir && touch -- -r mydir/keep1 mydir/keep2 )
+( cd "$d" && confirm * )
+echo "  rmv:    left over -> $(listing "$d")"
+check "rmv does not recurse into mydir" "-r mydir " "$(listing "$d")"
+
+echo
+echo "=============================================================="
+echo " 6. The ordinary case: argv already expanded, plain names"
 echo "=============================================================="
 echo
 echo "  Both are correct here. This is most deletes, and it is why the"

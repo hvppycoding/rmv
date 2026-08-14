@@ -55,6 +55,31 @@ shell:    rm -f tmp*                 # deleted: all four
 One file was named, four were deleted, and one of those four had never been on
 screen.
 
+**A file name starting with a dash is read as a flag.** This one does not need
+a shell at all — it catches any wrapper that sorts argv into options and targets,
+which is every wrapper:
+
+```
+directory:  -r  mydir/          # mydir holds files you want to keep
+argv:       ['-r', 'mydir']     # from rm *
+sorted as:  options ['-r'], targets ['mydir']
+shown:      mydir               # the file -r is not in the listing
+deleted:    mydir and everything under it
+```
+
+Nobody asked for recursion. A file that happens to be named `-r` turned it on,
+and removed itself from the listing on the way past. Without that file, `rm
+mydir` would have failed with "is a directory" and you would have noticed.
+
+`rmv` stops when an argument that looks like an option is also a file that
+exists, rather than guessing:
+
+```
+$ rmv *
+rmv: '-r' is both an option and a file that exists here
+rmv: refusing to guess. To delete them:  rmv -- <file>...
+```
+
 **A file name containing a space is split into two:**
 
 ```
