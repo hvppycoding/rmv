@@ -27,9 +27,6 @@ RM=/bin/rm
 # `rm a b c` while still catching globs and anything recursive.
 QUIET_THRESHOLD=${RMV_QUIET_THRESHOLD:-0}
 
-# Cap the walk so counting a huge tree over NFS cannot hang the prompt.
-COUNT_CAP=100000
-
 prog=${0##*/}
 
 usage() {
@@ -192,19 +189,6 @@ fi
 # -F so directories and symlinks are distinguishable at a glance. The arguments
 # are the frozen target list, never the original pattern.
 "$LS" -dF ${color[@]+"${color[@]}"} -- "${tgt_args[@]}"
-
-# ls -d prints a directory as a single line, which badly understates what
-# `rmv -rf build` is about to do. Size the recursive targets separately.
-for t in "${tgt_args[@]}"; do
-    if [ -d "$t" ] && [ ! -L "$t" ]; then
-        c=$(/usr/bin/find "$t" -mindepth 1 2>/dev/null \
-            | /usr/bin/head -n $((COUNT_CAP + 1)) | /usr/bin/wc -l | /usr/bin/tr -d ' ')
-        if [ "$c" -gt "$COUNT_CAP" ]; then
-            c="${COUNT_CAP}+"
-        fi
-        printf '  %s holds %s entries\n' "$t" "$c"
-    fi
-done
 
 # Typing the count rather than y: a yes/no gate stops being read after the first
 # dozen times, and it cannot be answered correctly without looking at the list.

@@ -181,19 +181,22 @@ Options:
 Listing is done by `/bin/ls -dF --color`, so it looks like the `ls` you already
 read. `-d` keeps directories from being expanded into their contents.
 
-`ls -d` prints a directory as one line, which badly understates what
-`rm -rf build` is about to do, so recursive targets are sized separately:
+`-F` marks what each target is, so a directory and a symlink are visible as
+such without opening either:
 
 ```
 $ rm -rf build dist config.link
 build/
 config.link@
 dist/
-  build holds 4 entries
-  dist holds 3 entries
 
 rmv: about to delete 3 items. Type the count to proceed (Enter cancels) > 3
 ```
+
+A directory is one line, which does understate what `rm -rf build` is about to
+do. Counting what is underneath would mean walking the tree on every prompt,
+which over NFS is a round trip per directory, so the listing stays at what the
+targets are rather than how big they are.
 
 ## Configuration
 
