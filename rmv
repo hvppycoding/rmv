@@ -1,0 +1,203 @@
+#!/bin/bash
+# rmv - rm that shows the list first, and deletes exactly the list it showed.
+#
+# The point of a preview is that what you reviewed is what gets deleted.
+# Running `ls <pattern>` and then `rm <pattern>` expands the pattern twice, so
+# anything created in between is deleted without ever appearing on screen. Here
+# the shell expands once into argv; that array is frozen, displayed, and then
+# handed to rm unchanged.
+#
+#   rmv *.log
+#   rmv -rf build dist
+#   rmv -- -weird-name.txt
+#
+# Every delete is confirmed. RMV_QUIET_THRESHOLD=3 lets deletes of up to three
+# plain files through without a prompt.
+#
+# Install (tcsh):  alias rm '~/bin/rmv'
+# Aliases do not apply inside scripts, so scripts keep getting the real rm.
+
+set -u
+
+LS=/bin/ls
+RM=/bin/rm
+
+# Every delete is shown and confirmed. Set RMV_QUIET_THRESHOLD to a count to let
+# small flat deletes through untouched instead -- 3 skips the prompt for
+# `rm a b c` while still catching globs and anything recursive.
+QUIET_THRESHOLD=${RMV_QUIET_THRESHOLD:-0}
+
+# Cap the walk so counting a huge tree over NFS cannot hang the prompt.
+COUNT_CAP=100000
+
+prog=${0##*/}
+
+usage() {
+    cat <<EOF
+Usage: $prog [OPTION]... FILE...
+
+Show the targets before deleting them, and delete exactly the list that was
+shown. Listing is done by $LS, removal by $RM.
+
+Options:
+  -r, -R, --recursive   remove directories and their contents
+  -f, --force           ignore nonexistent files, never report an error
+  -h, --help            show this help
+  --                    treat every later argument as a file name
+                        (for file names that begin with -)
+
+  Any other option is passed through to $RM unchanged.
+
+Confirmation:
+  After the listing, type the number of targets to proceed. Enter alone
+  cancels. It is a count rather than y/n because a count cannot be answered
+  without reading the list, and a y/n prompt stops being read.
+
+Environment:
+  RMV_QUIET_THRESHOLD   let deletes of this many plain files through without a
+                        prompt. Default 0, meaning always confirm. With 3,
+                        \`$prog a b c\` goes straight through while globs,
+                        directories and anything recursive still confirm.
+
+Examples:
+  $prog *.log
+  $prog -rf build dist
+  $prog -- -dash-file.txt
+
+Install (tcsh):
+  mkdir -p ~/bin && cp $prog ~/bin/ && chmod +x ~/bin/$prog
+  alias rm '~/bin/$prog'        # in ~/.cshrc
+
+  Aliases do not apply inside scripts, so existing scripts keep getting the
+  real $RM.
+EOF
+}
+
+if [ $# -eq 0 ]; then
+    usage
+    exit 0
+fi
+
+opts=()
+targets=()
+recursive=0
+force=0
+end_of_opts=0
+
+while [ $# -gt 0 ]; do
+    arg=$1
+    shift
+
+    if [ "$end_of_opts" -eq 1 ]; then
+        targets+=("$arg")
+        continue
+    fi
+
+    case $arg in
+        --)
+            end_of_opts=1
+            ;;
+        --recursive)
+            recursive=1
+            opts+=("$arg")
+            ;;
+        --force)
+            force=1
+            opts+=("$arg")
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        --*)
+            # Unrecognised long option: hand it to rm untouched.
+            opts+=("$arg")
+            ;;
+        -?*)
+            # A short-option cluster such as -rf. Inspect every letter so that
+            # recursion is detected however it was spelled.
+            case $arg in
+                *[rR]*) recursive=1 ;;
+            esac
+            case $arg in
+                *f*) force=1 ;;
+            esac
+            opts+=("$arg")
+            ;;
+        *)
+            targets+=("$arg")
+            ;;
+    esac
+done
+
+# ${arr[@]} on an empty array trips `set -u` under bash 3.2, so expand guarded.
+opt_args=(${opts[@]+"${opts[@]}"})
+tgt_args=(${targets[@]+"${targets[@]}"})
+n=${#tgt_args[@]}
+
+if [ "$n" -eq 0 ]; then
+    if [ "$force" -eq 1 ]; then
+        exit 0
+    fi
+    echo "$prog: missing operand (try '$prog --help')" >&2
+    exit 1
+fi
+
+has_dir=0
+for t in "${tgt_args[@]}"; do
+    if [ -d "$t" ] && [ ! -L "$t" ]; then
+        has_dir=1
+        break
+    fi
+done
+
+if [ "$n" -le "$QUIET_THRESHOLD" ] && [ "$recursive" -eq 0 ] && [ "$has_dir" -eq 0 ]; then
+    exec "$RM" ${opt_args[@]+"${opt_args[@]}"} -- "${tgt_args[@]}"
+fi
+
+# Force colour rather than letting ls autodetect, so the listing survives a
+# pipe into less -R. GNU spells it --color=always; BSD spells it -G.
+color=()
+if "$LS" --color=always -d . >/dev/null 2>&1; then
+    color=(--color=always)
+elif "$LS" -G -d . >/dev/null 2>&1; then
+    color=(-G)
+fi
+
+# -d so a directory is listed as itself rather than expanded into its contents,
+# -F so directories and symlinks are distinguishable at a glance. The arguments
+# are the frozen target list, never the original pattern.
+"$LS" -dF ${color[@]+"${color[@]}"} -- "${tgt_args[@]}"
+
+# ls -d prints a directory as a single line, which badly understates what
+# `rmv -rf build` is about to do. Size the recursive targets separately.
+for t in "${tgt_args[@]}"; do
+    if [ -d "$t" ] && [ ! -L "$t" ]; then
+        c=$(/usr/bin/find "$t" -mindepth 1 2>/dev/null \
+            | /usr/bin/head -n $((COUNT_CAP + 1)) | /usr/bin/wc -l | /usr/bin/tr -d ' ')
+        if [ "$c" -gt "$COUNT_CAP" ]; then
+            c="${COUNT_CAP}+"
+        fi
+        printf '  %s holds %s entries\n' "$t" "$c"
+    fi
+done
+
+# Typing the count rather than y: a yes/no gate stops being read after the first
+# dozen times, and it cannot be answered correctly without looking at the list.
+printf '\n%s: about to delete %d items. Type the count to proceed (Enter cancels) > ' \
+    "$prog" "$n"
+
+# Read from the terminal so the prompt still works with stdin on a pipe, and
+# fall back to stdin where there is no controlling tty. Redirections are applied
+# left to right, so 2>/dev/null has to come first to swallow a failing open.
+answer=
+if ! read -r answer 2>/dev/null < /dev/tty; then
+    read -r answer || answer=
+fi
+
+if [ "$answer" != "$n" ]; then
+    echo "$prog: cancelled" >&2
+    exit 1
+fi
+
+exec "$RM" ${opt_args[@]+"${opt_args[@]}"} -- "${tgt_args[@]}"
