@@ -175,6 +175,40 @@ $ ./demo.sh
 Case 5 is there on purpose: with argv already expanded and plain file names,
 the naive wrapper is correct, which is why it feels fine for a long time.
 
+## The eight-line version
+
+Being correct here is not the expensive part. The whole difference is passing
+the targets as an array rather than joining them into a string for a shell, and
+the array is the shorter spelling:
+
+```bash
+#!/bin/bash
+opts=(); while [[ ${1-} == -?* ]]; do opts+=("$1"); shift; done
+[ $# -eq 0 ] && exit 1
+/bin/ls -dF --color=always -- "$@"
+printf 'delete %d items? type the count > ' "$#"
+read -r a
+[ "$a" = "$#" ] || { echo cancelled >&2; exit 1; }
+exec /bin/rm "${opts[@]}" -- "$@"
+```
+
+That passes every case in `demo.sh`, exactly like the full script:
+
+```
+$ ./demo.sh /tmp/rmv-min
+    ok    rmv keeps report1.txt
+    ok    rmv keeps my
+    ok    rmv keeps the new file
+    ok    rmv runs no extra command
+    ok    rmv deletes exactly the logs
+```
+
+Everything `rmv` has beyond those eight lines is comfort, not safety: option
+parsing that keeps `-r` and `-f` behaving like they do in `rm`, entry counts so
+`rm -rf build` shows its size, `--help`, `RMV_QUIET_THRESHOLD`, and a colour
+flag that works on both GNU and BSD. Take the eight lines if you would rather
+not carry the rest.
+
 ## Requirements
 
 `bash` 3.2+, `/bin/ls`, `/bin/rm`. Tested on RHEL 8 (GNU coreutils) and macOS
