@@ -8,7 +8,7 @@ app.log
 debug.log
 error.log
 
-rmv: about to delete 3 items. Type the count to proceed (Enter cancels) >
+rmv: delete 3 items? [y/N] >
 ```
 
 ## Why not just script `ls` then `rm`?
@@ -134,13 +134,18 @@ subprocess.run(f"rm -rf {arg}", shell=True)
 
 Both are fine. The array is one line shorter and there is nothing to forget.
 
-## Why a count instead of `y/n`?
+## Why a flag?
 
-Because `y/n` stops being read. `rm -i` was the original answer to this and it is
-now the single most aliased-away flag in Unix, for exactly that reason — a prompt
-you answer reflexively is not a prompt.
+Without `-p` this is `rm`. The preview and the prompt only appear when the flag
+is there, which keeps the same file usable from scripts and safe to put on
+`PATH`.
 
-Typing the number of targets cannot be answered without looking at the list.
+You are not meant to type it. Put it in the alias, so interactive deletes always
+preview and nothing else changes:
+
+```csh
+alias rm '~/bin/rmv -p'
+```
 
 ## Install
 
@@ -152,12 +157,12 @@ Then alias `rm` to it:
 
 ```csh
 # tcsh — ~/.cshrc
-alias rm '~/bin/rmv'
+alias rm '~/bin/rmv -p'
 ```
 
 ```sh
 # bash / zsh — ~/.bashrc or ~/.zshrc
-alias rm='~/bin/rmv'
+alias rm='~/bin/rmv -p'
 ```
 
 Aliases do not apply inside scripts, so existing scripts keep getting the real
@@ -170,6 +175,7 @@ you lose the net, nothing breaks.
 Usage: rmv [OPTION]... FILE...
 
 Options:
+  -p, --preview         show the targets and confirm before deleting
   -r, -R, --recursive   remove directories and their contents
   -f, --force           ignore nonexistent files, never report an error
   -h, --help            show this help
@@ -177,6 +183,9 @@ Options:
 
   Any other option is passed through to /bin/rm unchanged.
 ```
+
+`-p` clusters like any other short flag, so `rmv -rfp build` works and only
+`-rf` reaches `/bin/rm`.
 
 Listing is done by `/bin/ls -dF --color`, so it looks like the `ls` you already
 read. `-d` keeps directories from being expanded into their contents.
@@ -190,7 +199,7 @@ build/
 config.link@
 dist/
 
-rmv: about to delete 3 items. Type the count to proceed (Enter cancels) > 3
+rmv: delete 3 items? [y/N] > y
 ```
 
 A directory is one line, which does understate what `rm -rf build` is about to
@@ -202,7 +211,7 @@ targets are rather than how big they are.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `RMV_QUIET_THRESHOLD` | `0` | Let deletes of this many plain files through without a prompt. `0` always confirms. |
+| `RMV_QUIET_THRESHOLD` | `0` | In preview mode, let deletes of this many plain files through without a prompt. `0` always confirms. |
 
 With `RMV_QUIET_THRESHOLD=3`, `rm a b c` goes straight through, while globs,
 directories and anything recursive still confirm. Useful if the prompt starts to
@@ -240,14 +249,14 @@ $ ./demo.sh
   rmv:    left over -> report1.txt
     ok    rmv keeps report1.txt
 ...
- 5. The ordinary case: argv already expanded, plain names
+ 6. The ordinary case: argv already expanded, plain names
     ok    naive deletes exactly the logs
     ok    rmv deletes exactly the logs
 
- 6 ok, 4 failed
+ 7 ok, 5 failed
 ```
 
-Case 5 is there on purpose: with argv already expanded and plain file names,
+The last case is there on purpose: with argv already expanded and plain file names,
 the naive wrapper is correct, which is why it feels fine for a long time.
 
 ## The eight-line version
@@ -261,9 +270,9 @@ the array is the shorter spelling:
 opts=(); while [[ ${1-} == -?* ]]; do opts+=("$1"); shift; done
 [ $# -eq 0 ] && exit 1
 /bin/ls -dF --color=always -- "$@"
-printf 'delete %d items? type the count > ' "$#"
+printf 'delete %d items? [y/N] > ' "$#"
 read -r a
-[ "$a" = "$#" ] || { echo cancelled >&2; exit 1; }
+[ "$a" = y ] || { echo cancelled >&2; exit 1; }
 exec /bin/rm "${opts[@]}" -- "$@"
 ```
 
@@ -275,13 +284,14 @@ $ ./demo.sh /tmp/rmv-min
     ok    rmv keeps my
     ok    rmv keeps the new file
     ok    rmv runs no extra command
+    ok    rmv does not recurse into mydir
     ok    rmv deletes exactly the logs
 ```
 
 Everything `rmv` has beyond those eight lines is comfort, not safety: option
-parsing that keeps `-r` and `-f` behaving like they do in `rm`, entry counts so
-`rm -rf build` shows its size, `--help`, `RMV_QUIET_THRESHOLD`, and a colour
-flag that works on both GNU and BSD. Take the eight lines if you would rather
+parsing that keeps `-r` and `-f` behaving like they do in `rm`, the `-p` gate,
+the guard for a file named like an option, `--help`, `RMV_QUIET_THRESHOLD`, and
+a colour flag that works on both GNU and BSD. Take the eight lines if you would rather
 not carry the rest.
 
 ## Requirements

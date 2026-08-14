@@ -34,9 +34,9 @@ naive() {
     /bin/sh -c "rm -rf $args" >/dev/null 2>&1
 }
 
-# rmv, answering its confirmation with the count it asked for.
+# rmv in preview mode, answering its confirmation.
 confirm() {
-    printf '%s\n' "$#" | "$RMV" -rf "$@" >/dev/null 2>&1
+    printf 'y\n' | "$RMV" -rfp "$@" >/dev/null 2>&1
 }
 
 listing() {

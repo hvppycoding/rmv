@@ -7,14 +7,14 @@
 # the shell expands once into argv; that array is frozen, displayed, and then
 # handed to rm unchanged.
 #
-#   rmv *.log
-#   rmv -rf build dist
-#   rmv -- -weird-name.txt
+#   rmv -p *.log
+#   rmv -rfp build dist
+#   rmv -p -- -weird-name.txt
 #
-# Every delete is confirmed. RMV_QUIET_THRESHOLD=3 lets deletes of up to three
-# plain files through without a prompt.
+# Without -p it is rm. With -p every delete is confirmed;
+# RMV_QUIET_THRESHOLD=3 lets deletes of up to three plain files through.
 #
-# Install (tcsh):  alias rm '~/bin/rmv'
+# Install (tcsh):  alias rm '~/bin/rmv -p'
 # Aliases do not apply inside scripts, so scripts keep getting the real rm.
 
 set -u
@@ -33,10 +33,14 @@ usage() {
     cat <<EOF
 Usage: $prog [OPTION]... FILE...
 
-Show the targets before deleting them, and delete exactly the list that was
-shown. Listing is done by $LS, removal by $RM.
+With -p, show the targets and ask before deleting them, and delete exactly the
+list that was shown. Listing is done by $LS, removal by $RM.
+
+Without -p this is $RM, so the same file can be called from scripts. Put the
+flag in the interactive alias instead of typing it.
 
 Options:
+  -p, --preview         show the targets and confirm before deleting
   -r, -R, --recursive   remove directories and their contents
   -f, --force           ignore nonexistent files, never report an error
   -h, --help            show this help
@@ -45,25 +49,20 @@ Options:
 
   Any other option is passed through to $RM unchanged.
 
-Confirmation:
-  After the listing, type the number of targets to proceed. Enter alone
-  cancels. It is a count rather than y/n because a count cannot be answered
-  without reading the list, and a y/n prompt stops being read.
-
 Environment:
-  RMV_QUIET_THRESHOLD   let deletes of this many plain files through without a
-                        prompt. Default 0, meaning always confirm. With 3,
-                        \`$prog a b c\` goes straight through while globs,
-                        directories and anything recursive still confirm.
+  RMV_QUIET_THRESHOLD   with -p, let deletes of this many plain files through
+                        without a prompt. Default 0, meaning always confirm.
+                        With 3, \`$prog -p a b c\` goes straight through while
+                        globs, directories and anything recursive still confirm.
 
 Examples:
-  $prog *.log
-  $prog -rf build dist
-  $prog -- -dash-file.txt
+  $prog -p *.log
+  $prog -rfp build dist
+  $prog -p -- -dash-file.txt
 
 Install (tcsh):
   mkdir -p ~/bin && cp $prog ~/bin/ && chmod +x ~/bin/$prog
-  alias rm '~/bin/$prog'        # in ~/.cshrc
+  alias rm '~/bin/$prog -p'     # in ~/.cshrc
 
   Aliases do not apply inside scripts, so existing scripts keep getting the
   real $RM.
@@ -73,6 +72,34 @@ EOF
 if [ $# -eq 0 ]; then
     usage
     exit 0
+fi
+
+# Help is ours, not rm's, so it has to be answered before anything is handed
+# over. Only arguments before -- are considered: after it everything is a name.
+for a in "$@"; do
+    case $a in
+        --) break ;;
+        -h|--help) usage; exit 0 ;;
+    esac
+done
+
+# Without -p this is rm. The preview costs a flag so that the same file can sit
+# on PATH and be called from scripts, while the interactive alias carries the
+# flag and always previews:  alias rm '~/bin/rmv -p'
+#
+# The short form is matched with a second character that is not a dash, so that
+# long options containing a p -- --preserve-root above all -- are left alone.
+preview=0
+for a in "$@"; do
+    case $a in
+        --) break ;;
+        --preview) preview=1; break ;;
+        -[!-]*p*|-p) preview=1; break ;;
+    esac
+done
+
+if [ "$preview" -eq 0 ]; then
+    exec "$RM" "$@"
 fi
 
 opts=()
@@ -112,6 +139,9 @@ while [ $# -gt 0 ]; do
         --)
             end_of_opts=1
             ;;
+        --preview)
+            # Consumed here; rm knows nothing about it.
+            ;;
         --recursive)
             recursive=1
             opts+=("$arg")
@@ -137,7 +167,12 @@ while [ $# -gt 0 ]; do
             case $arg in
                 *f*) force=1 ;;
             esac
-            opts+=("$arg")
+            # Take our own flag back out of the cluster before rm sees it. Only
+            # short clusters reach here; long options matched --* above.
+            arg=${arg//p/}
+            if [ "$arg" != "-" ]; then
+                opts+=("$arg")
+            fi
             ;;
         *)
             targets+=("$arg")
@@ -194,10 +229,7 @@ fi
 # are the frozen target list, never the original pattern.
 "$LS" -dF ${color[@]+"${color[@]}"} -- "${tgt_args[@]}"
 
-# Typing the count rather than y: a yes/no gate stops being read after the first
-# dozen times, and it cannot be answered correctly without looking at the list.
-printf '\n%s: about to delete %d items. Type the count to proceed (Enter cancels) > ' \
-    "$prog" "$n"
+printf '\n%s: delete %d items? [y/N] > ' "$prog" "$n"
 
 # Interactively the answer comes from the terminal. With stdin redirected it
 # comes from stdin, so the confirmation can be scripted and tested; reaching EOF
@@ -210,9 +242,12 @@ else
     read -r answer || answer=
 fi
 
-if [ "$answer" != "$n" ]; then
-    echo "$prog: cancelled" >&2
-    exit 1
-fi
+case $answer in
+    y|Y|yes|YES) ;;
+    *)
+        echo "$prog: cancelled" >&2
+        exit 1
+        ;;
+esac
 
 exec "$RM" ${opt_args[@]+"${opt_args[@]}"} -- "${tgt_args[@]}"
