@@ -39,6 +39,22 @@ deleted:  report1.txt                # a file that was never on screen
 left:     report[1].txt              # the file you did ask for
 ```
 
+It is tempting to think this cannot reach outside the arguments you passed —
+argv is already a list of real files, so how could anything else be involved?
+It can, because joining that list turns a name back into a live pattern, and a
+live pattern picks up whatever is in the directory, including files that arrive
+while you are reading:
+
+```
+argv:     ['tmp*']                   # one file, whose name contains a star
+shell:    ls -d tmp*                 # shown: tmp*  tmpA.log  tmpB.log
+          # a job writes tmpC.log while you are reading
+shell:    rm -f tmp*                 # deleted: all four
+```
+
+One file was named, four were deleted, and one of those four had never been on
+screen.
+
 **A file name containing a space is split into two:**
 
 ```
@@ -61,6 +77,37 @@ deleted:  old1.log, old2.log, IMPORTANT-result.log
 array is frozen, displayed, and passed to `rm` as the same array. No shell sees
 it, so `weird;$(whoami).txt` is just a file name, and what you reviewed is what
 gets deleted.
+
+### How likely is any of this?
+
+Not very. Ordinary file names with no spaces and no glob characters go through
+the naive wrapper correctly, which is most deletes and why it survives in
+everyone's dotfiles for years. Spaces show up often enough, but they usually
+fail loudly — `rm my file.txt` reports two missing files and deletes nothing,
+unless a file named `my` happens to exist. The silent, destructive versions need
+a file name that contains a glob character, which is rare.
+
+The reason to care anyway is that avoiding all of it is free. Passing an array
+is not more code than joining a string — it is one line less. Whatever you think
+of the odds, there is nothing to trade away:
+
+```python
+subprocess.run(["ls", "-dF", "--color=always", *targets])   # instead of
+subprocess.run(["rm", "-rf", *targets])                     # shell=True on an f-string
+```
+
+Escaping the arguments for the second shell works too, and is the right fix if
+you want to keep building a command string — `shlex.quote` in Python, `printf
+%q` in bash. Note that escaping for the first shell does not do it: typing
+`del 'tmp*'` protects the name from the shell you typed into, not from the one
+the wrapper starts afterwards.
+
+```python
+arg = " ".join(shlex.quote(t) for t in targets)   # correct, has to be remembered
+subprocess.run(f"rm -rf {arg}", shell=True)
+```
+
+Both are fine. The array is one line shorter and there is nothing to forget.
 
 ## Why a count instead of `y/n`?
 
