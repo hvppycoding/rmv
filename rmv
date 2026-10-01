@@ -55,6 +55,10 @@ Environment:
                         With 3, \`$prog -p a b c\` goes straight through while
                         globs, directories and anything recursive still confirm.
 
+  -p only asks when stdin is a terminal. Without one, or when CLAUDECODE,
+  AI_AGENT, FARAD_AGENT or CODEX_SANDBOX is set (an agent is running the
+  command), it deletes without asking, like $RM.
+
 Examples:
   $prog -p *.log
   $prog -rfp build dist
@@ -215,6 +219,14 @@ if [ "$n" -le "$QUIET_THRESHOLD" ] && [ "$recursive" -eq 0 ] && [ "$has_dir" -eq
     exec "$RM" ${opt_args[@]+"${opt_args[@]}"} -- "${tgt_args[@]}"
 fi
 
+# Confirm only when a person is at the keyboard. Agents source the same rc file
+# and so get the alias, but nobody reads their prompt: stdin that never closes
+# hangs the command, and an agent on a pty would stall on /dev/tty. Without a
+# terminal on stdin, or under a known agent marker, the delete goes through.
+if [ ! -t 0 ] || [ -n "${CLAUDECODE-}${AI_AGENT-}${FARAD_AGENT-}${CODEX_SANDBOX-}" ]; then
+    exec "$RM" ${opt_args[@]+"${opt_args[@]}"} -- "${tgt_args[@]}"
+fi
+
 # Force colour rather than letting ls autodetect, so the listing survives a
 # pipe into less -R. GNU spells it --color=always; BSD spells it -G.
 color=()
@@ -231,16 +243,11 @@ fi
 
 printf '\n%s: delete %d items? [y/N] > ' "$prog" "$n"
 
-# Interactively the answer comes from the terminal. With stdin redirected it
-# comes from stdin, so the confirmation can be scripted and tested; reaching EOF
-# there leaves the answer empty, which cancels. Redirections apply left to
-# right, so 2>/dev/null has to come first to swallow a failing open.
+# stdin is a terminal here. Read the answer from /dev/tty, falling back to stdin;
+# EOF leaves it empty, which cancels. Redirections apply left to right, so
+# 2>/dev/null has to come first to swallow a failing open.
 answer=
-if [ -t 0 ]; then
-    read -r answer 2>/dev/null < /dev/tty || read -r answer || answer=
-else
-    read -r answer || answer=
-fi
+read -r answer 2>/dev/null < /dev/tty || read -r answer || answer=
 
 case $answer in
     y|Y|yes|YES) ;;

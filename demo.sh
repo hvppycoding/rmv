@@ -34,7 +34,8 @@ naive() {
     /bin/sh -c "rm -rf $args" >/dev/null 2>&1
 }
 
-# rmv in preview mode, answering its confirmation.
+# rmv in preview mode. stdin is a pipe, not a terminal, so rmv deletes without
+# asking; the y is for the eight-line version in the README, which always asks.
 confirm() {
     printf 'y\n' | "$RMV" -rfp "$@" >/dev/null 2>&1
 }

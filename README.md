@@ -169,6 +169,15 @@ Aliases do not apply inside scripts, so existing scripts keep getting the real
 `/bin/rm`. If you land on a machine without your dotfiles you get a plain `rm` —
 you lose the net, nothing breaks.
 
+### Agents and pipes
+
+Coding agents (Claude Code, Codex, Farad, ...) usually source the same rc file, so
+they get the alias too, but nobody is there to answer the prompt. A stdin that
+never closes would hang the command, and an agent running on a pty would stall
+on `/dev/tty`. So `-p` only asks when stdin is a terminal and none of
+`CLAUDECODE`, `AI_AGENT`, `FARAD_AGENT` or `CODEX_SANDBOX` is set. Otherwise it
+deletes the same frozen list without asking, like `rm`.
+
 ## Usage
 
 ```
